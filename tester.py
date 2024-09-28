@@ -4,12 +4,24 @@ import asyncio
 import argparse
 import os
 
+import Encoding
+import DeCoding
+
+# Dummy encoder and decoder functions for demonstration
+def encode_data(data):
+    # Replace this with your actual encoding logic
+    return data  # No-op for this example
+
+def decode_data(data):
+    # Replace this with your actual decoding logic
+    return data  # No-op for this example
+
 class P2PNode:
     def __init__(self, host='172.20.10.13', port=12345):
         self.host = host
         self.port = port
         self.connections = {}
-        self.node_id = f"{host}:{port}"  # Unique identifier for the node
+        self.node_id = f"{host}:{port}"
 
     def handle_client(self, client_socket, addr):
         """Handle incoming file transfers from a client."""
@@ -21,20 +33,18 @@ class P2PNode:
                     break
                 file_size = int.from_bytes(file_size_data, byteorder='big')
 
-                if file_size > 512:
-                    print("File size exceeds 512 bytes. Ignoring.")
-                    continue
-
                 # Receive the file data
                 file_data = b''
                 while len(file_data) < file_size:
-                    packet = client_socket.recv(512)
+                    packet = client_socket.recv(4096)
                     if not packet:
                         break
                     file_data += packet
 
                 if file_data:
-                    self.handle_received_file(file_data)
+                    # Decode the received data
+                    decoded_data = DeCoding.read_chunks_with_header(file_data)
+                    self.handle_received_file(decoded_data)
 
             except Exception as e:
                 print(f"Error: {e}")
@@ -45,7 +55,6 @@ class P2PNode:
     def handle_received_file(self, file_data):
         """Handle the received file data."""
         print(f"Received file of size {len(file_data)} bytes")
-        # Save the file (or handle it as needed)
         with open("received_file", "wb") as f:
             f.write(file_data)
         print("File saved as 'received_file'")
@@ -78,21 +87,22 @@ class P2PNode:
 
     async def send_file(self, peer_addr, file_path):
         """Asynchronous method to send a file to a specific peer."""
-        if os.path.getsize(file_path) > 512:
-            print("File size exceeds 512 bytes. Cannot send.")
-            return
+        file_size = os.path.getsize(file_path)
         
         with open(file_path, "rb") as f:
             file_data = f.read()
+
+        # Encode the data before sending
+        encoded_data = Encoding.split_file_with_header(file_data)
         
         # Send file size first
-        file_size = len(file_data)
         if peer_addr in self.connections:
             try:
-                # Send file size as 4 bytes
                 self.connections[peer_addr].sendall(file_size.to_bytes(4, byteorder='big'))
-                # Send the file data
-                self.connections[peer_addr].sendall(file_data)
+                total_sent = 0
+                while total_sent < len(encoded_data):
+                    sent = self.connections[peer_addr].send(encoded_data[total_sent:total_sent + 4096])
+                    total_sent += sent
                 print(f"Sent file to {peer_addr}: {file_path}")
             except Exception as e:
                 print(f"Error sending file to {peer_addr}: {e}")
