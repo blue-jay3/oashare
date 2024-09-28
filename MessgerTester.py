@@ -8,7 +8,7 @@ class P2PNode:
         self.host = host
         self.port = port
         self.connections = {}
-        self.node_id = f"{host}:{port}"  # Unique identifier for the node
+        self.node_id = f"{host}:{port}"
 
     def handle_client(self, client_socket, addr):
         """Handle incoming messages from a client."""
@@ -17,24 +17,12 @@ class P2PNode:
                 message = client_socket.recv(1024)
                 if not message:
                     break
-                message = message.decode()
-                # Print received message, do not re-broadcast our own messages
-                if not message.startswith(f"msg:{self.node_id}:"):
-                    print(f"Received from {addr}: {message}")
-                    self.broadcast(message)
+                print(f"Received message from {addr}: {message.decode()}")
             except Exception as e:
                 print(f"Error: {e}")
                 break
         client_socket.close()
         del self.connections[addr]
-
-    def broadcast(self, message):
-        """Send a message to all connected clients."""
-        for addr, conn in self.connections.items():
-            try:
-                conn.sendall(message.encode())
-            except Exception as e:
-                print(f"Error sending message to {addr}: {e}")
 
     def start_server(self):
         """Start the TCP server."""
@@ -57,13 +45,17 @@ class P2PNode:
         self.connections[(peer_host, peer_port)] = peer_socket
         print(f"Connected to peer at {peer_host}:{peer_port}")
 
+    async def connect_to_peers(self, peers):
+        """Connect to multiple peers."""
+        for peer_host, peer_port in peers:
+            await self.connect_to_peer(peer_host, peer_port)
+
     async def send_message(self, peer_addr, message):
         """Asynchronous method to send a message to a specific peer."""
         if peer_addr in self.connections:
-            prefixed_message = f"msg:{self.node_id}:{message}"  # Prefix with node ID
             try:
-                self.connections[peer_addr].sendall(prefixed_message.encode())
-                print(f"Sent to {peer_addr}: {message}")
+                self.connections[peer_addr].sendall(message.encode())
+                print(f"Sent message to {peer_addr}: {message}")
             except Exception as e:
                 print(f"Error sending message to {peer_addr}: {e}")
         else:
@@ -101,7 +93,7 @@ class P2PNode:
             conn.close()
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description='P2P Node')
+    parser = argparse.ArgumentParser(description='P2P Node for Messaging')
     parser.add_argument('--peers', type=str, nargs='+', required=False,
                         help='List of initial peers in the format host:port (e.g., 127.0.0.1:12346)')
 
