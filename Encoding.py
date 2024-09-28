@@ -3,6 +3,7 @@ import struct
 def split_file_with_header(file_path, chunk_size=32):
     with open(file_path, 'rb') as file:
         chunk_number = 0
+        send_to_data = [[0,0,0]]
         while True:
             chunk = file.read(chunk_size)
             if not chunk:
@@ -20,7 +21,16 @@ def split_file_with_header(file_path, chunk_size=32):
             with open(f'chunk_{chunk_number}', 'wb') as chunk_file:
                 chunk_file.write(data_with_header)
             
-            chunk_number += 1
+            chunk_number += 1   
+            newList = [[data_with_header,next_IP_Address,next_Port]]
+            send_to_data= appendList(send_to_data,newList)
+    return send_to_data
+
+def appendList(l,element):
+    l.append(element)
+    return l
 
 # Example usage
 split_file_with_header('fun.txt')
+
+
