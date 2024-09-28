@@ -6,13 +6,6 @@ import os
 
 import Encoding
 
-def encoder_function(file_path):
-    # This is where your encoding logic goes
-    # For demonstration, let's assume it returns a 2D array:
-    encoded_file_path = f"encoded_{os.path.basename(file_path)}"  # Simulated encoded file
-    return [[encoded_file_path, '127.0.0.1', 12346],  # Example address and port
-            [encoded_file_path, '127.0.0.1', 12347]]  # Additional example
-
 class P2PNode:
     def __init__(self, host='127.0.0.1', port=12345):
         self.host = host
