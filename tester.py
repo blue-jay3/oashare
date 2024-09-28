@@ -5,51 +5,29 @@ import argparse
 import os
 
 import Encoding
-import DeCoding
-
 
 class P2PNode:
-    def __init__(self, host='172.20.10.12', port=12345):
+    def __init__(self, host='127.0.0.1', port=12345):
         self.host = host
         self.port = port
         self.connections = {}
         self.node_id = f"{host}:{port}"
 
     def handle_client(self, client_socket, addr):
-        """Handle incoming file transfers from a client."""
+        """Handle incoming messages from a client."""
+        print(f"Handling client: {addr}")
         while True:
             try:
-                # Receive the file size first
-                file_size_data = client_socket.recv(4)
-                if not file_size_data:
+                message = client_socket.recv(1024)
+                if not message:
+                    print(f"Connection closed by {addr}")
                     break
-                file_size = int.from_bytes(file_size_data, byteorder='big')
-
-                # Receive the file data
-                file_data = b''
-                while len(file_data) < file_size:
-                    packet = client_socket.recv(4096)
-                    if not packet:
-                        break
-                    file_data += packet
-
-                if file_data:
-                    # Decode the received data
-                    decoded_data = DeCoding.read_chunks_with_header(file_data)
-                    self.handle_received_file(decoded_data)
-
+                print(f"Received message from {addr}: {message.decode()}")
             except Exception as e:
-                print(f"Error: {e}")
+                print(f"Error handling client {addr}: {e}")
                 break
         client_socket.close()
         del self.connections[addr]
-
-    def handle_received_file(self, file_data):
-        """Handle the received file data."""
-        print(f"Received file of size {len(file_data)} bytes")
-        with open("received_file", "wb") as f:
-            f.write(file_data)
-        print("File saved as 'received_file'")
 
     def start_server(self):
         """Start the TCP server."""
@@ -68,43 +46,54 @@ class P2PNode:
     async def connect_to_peer(self, peer_host, peer_port):
         """Connect to a single peer."""
         peer_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        peer_socket.connect((peer_host, peer_port))
-        self.connections[(peer_host, peer_port)] = peer_socket
-        print(f"Connected to peer at {peer_host}:{peer_port}")
+        try:
+            peer_socket.connect((peer_host, peer_port))
+            self.connections[(peer_host, peer_port)] = peer_socket
+            print(f"Connected to peer at {peer_host}:{peer_port}")
+        except Exception as e:
+            print(f"Failed to connect to {peer_host}:{peer_port} - {e}")
 
     async def connect_to_peers(self, peers):
         """Connect to multiple peers."""
         for peer_host, peer_port in peers:
             await self.connect_to_peer(peer_host, peer_port)
 
-    async def send_file(self, peer_addr, file_path):
-        """Asynchronous method to send a file to a specific peer."""
-        file_size = os.path.getsize(file_path)
-        
+    async def send_encoded_file(self, peer_addr, file_path):
+        """Send an encoded file to a specific peer."""
+        # Read the file
         with open(file_path, "rb") as f:
             file_data = f.read()
 
-        # Encode the data before sending
+        # Encode the file data
+        encoded_data = self.encode_data(file_data)
 
-        chunk_list = Encoding.split_file_with_header(file_data)
-        
         # Send file size first
+        file_size = len(encoded_data)
         if peer_addr in self.connections:
             try:
-                for _ in chunk_list:
-                    for
                 self.connections[peer_addr].sendall(file_size.to_bytes(4, byteorder='big'))
                 total_sent = 0
-                while total_sent < len(encoded_data):
+                while total_sent < file_size:
                     sent = self.connections[peer_addr].send(encoded_data[total_sent:total_sent + 4096])
                     total_sent += sent
-                print(f"Sent file to {peer_addr}: {file_path}")
+                print(f"Sent encoded file to {peer_addr}: {file_path}")
             except Exception as e:
                 print(f"Error sending file to {peer_addr}: {e}")
         else:
             print(f"Peer {peer_addr} is not connected.")
 
-    async def run(self, initial_peers):
+    def encode_data(self, data):
+        # Dummy encoder function - replace with your actual encoding logic
+        return data  # No-op for this example
+
+    async def send_files(self, file_info_array):
+        """Send files based on a 2D array containing file paths, IPs, and ports."""
+        for file_info in file_info_array:
+            file_path, ip, port = file_info
+            peer_addr = (ip, port)
+            await self.send_encoded_file(peer_addr, file_path)
+
+    async def run(self, initial_peers, file_info_array):
         # Start server in a separate thread
         server_thread = threading.Thread(target=self.start_server)
         server_thread.start()
@@ -112,31 +101,15 @@ class P2PNode:
         # Connect to the initial peers
         await self.connect_to_peers(initial_peers)
 
-        # Asynchronous loop for sending files and adding new peers
-        while True:
-            command = input("Enter 'send:<host>:<port>:<file_path>' to send a file, 'add:<host>:<port>' to add a peer, or 'exit' to quit: ")
-            if command.lower() == 'exit':
-                break
-            
-            if command.startswith("send:"):
-                try:
-                    _, host, port, file_path = command.split(':', 3)  # Split into host, port, and file path
-                    await self.send_file((host, int(port)), file_path)
-                except ValueError:
-                    print("Invalid format. Use 'send:<host>:<port>:<file_path>'.")
-            elif command.startswith("add:"):
-                try:
-                    _, host, port = command.split(':')
-                    await self.connect_to_peer(host, int(port))
-                except ValueError:
-                    print("Invalid format. Use 'add:<host>:<port>'.")
+        # Send files
+        await self.send_files(file_info_array)
 
         # Cleanup
         for conn in self.connections.values():
             conn.close()
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description='P2P Node for File Transfer')
+    parser = argparse.ArgumentParser(description='P2P Node for Messaging and File Transfer')
     parser.add_argument('--peers', type=str, nargs='+', required=False,
                         help='List of initial peers in the format host:port (e.g., 127.0.0.1:12346)')
 
@@ -149,5 +122,8 @@ if __name__ == "__main__":
             host, port = peer.split(':')
             initial_peers.append((host, int(port)))
 
+    # Example 2D array of files to send: [ [file_path, ip, port], ... ]
+    file_info_array = Encoding.split_file_with_header(fun.txt)
+
     node = P2PNode()
-    asyncio.run(node.run(initial_peers))
+    asyncio.run(node.run(initial_peers, file_info_array))
