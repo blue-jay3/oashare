@@ -6,6 +6,13 @@ import os
 
 import Encoding
 
+def encoder_function(file_path):
+    # This is where your encoding logic goes
+    # For demonstration, let's assume it returns a 2D array:
+    encoded_file_path = f"encoded_{os.path.basename(file_path)}"  # Simulated encoded file
+    return [[encoded_file_path, '127.0.0.1', 12346],  # Example address and port
+            [encoded_file_path, '127.0.0.1', 12347]]  # Additional example
+
 class P2PNode:
     def __init__(self, host='127.0.0.1', port=12345):
         self.host = host
@@ -64,17 +71,15 @@ class P2PNode:
         with open(file_path, "rb") as f:
             file_data = f.read()
 
-        # Encode the file data
-        encoded_data = self.encode_data(file_data)
-
         # Send file size first
-        file_size = len(encoded_data)
+        file_size = len(file_data)
         if peer_addr in self.connections:
             try:
+                # Send the file size first
                 self.connections[peer_addr].sendall(file_size.to_bytes(4, byteorder='big'))
                 total_sent = 0
                 while total_sent < file_size:
-                    sent = self.connections[peer_addr].send(encoded_data[total_sent:total_sent + 4096])
+                    sent = self.connections[peer_addr].send(file_data[total_sent:total_sent + 4096])
                     total_sent += sent
                 print(f"Sent encoded file to {peer_addr}: {file_path}")
             except Exception as e:
@@ -82,18 +87,24 @@ class P2PNode:
         else:
             print(f"Peer {peer_addr} is not connected.")
 
-    def encode_data(self, data):
-        # Dummy encoder function - replace with your actual encoding logic
-        return data  # No-op for this example
+    async def upload_file(self):
+        """Upload a file, encode it, and return the file info in a 2D array."""
+        file_path = input("Enter the path of the file to upload: ")
+        
+        # Call the encoder function and get the 2D array
+        file_info_array = Encoding.split_file_with_header(file_path)
+        
+        # Send the encoded files to the specified addresses
+        await self.send_files(file_info_array)
 
     async def send_files(self, file_info_array):
         """Send files based on a 2D array containing file paths, IPs, and ports."""
         for file_info in file_info_array:
-            file_path, ip, port = file_info
+            encoded_file_path, ip, port = file_info
             peer_addr = (ip, port)
-            await self.send_encoded_file(peer_addr, file_path)
+            await self.send_encoded_file(peer_addr, encoded_file_path)
 
-    async def run(self, initial_peers, file_info_array):
+    async def run(self, initial_peers):
         # Start server in a separate thread
         server_thread = threading.Thread(target=self.start_server)
         server_thread.start()
@@ -101,8 +112,8 @@ class P2PNode:
         # Connect to the initial peers
         await self.connect_to_peers(initial_peers)
 
-        # Send files
-        await self.send_files(file_info_array)
+        # Upload and send the file
+        await self.upload_file()
 
         # Cleanup
         for conn in self.connections.values():
@@ -122,8 +133,5 @@ if __name__ == "__main__":
             host, port = peer.split(':')
             initial_peers.append((host, int(port)))
 
-    # Example 2D array of files to send: [ [file_path, ip, port], ... ]
-    file_info_array = Encoding.split_file_with_header(fun.txt)
-
     node = P2PNode()
-    asyncio.run(node.run(initial_peers, file_info_array))
+    asyncio.run(node.run(initial_peers))
