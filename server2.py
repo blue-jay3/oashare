@@ -11,14 +11,21 @@ def handle_client(conn, addr):
                 break
             print(f"Received from {addr}: {data.decode()}")
             conn.sendall(data)  # Echo back the received data
-            message = input("").encode()
-            print('Sending:', message.decode())
-            conn.sendall(message)
+            #message = input("").encode()
+            #print('Sending:', message.decode())
+            #conn.sendall(message)
         except Exception as e:
             print(f"Error with client {addr}: {e}")
             break
     conn.close()
     print(f"Disconnected from {addr}")
+
+async def getInput():
+    message = await input("").encode()
+    print('Sending:', message.decode())
+    for conn in clientList:
+        conn.sendall(message)
+
 
 port = 12345  # Specify your port number
 
@@ -28,7 +35,11 @@ server_sock.bind(('192.168.77.246', port))
 server_sock.listen(5)  # Allow up to 5 queued connections
 print(f"Server listening on port {port}...")
 
+clientList = []
+
 while True:
     conn, addr = server_sock.accept()  # Accept a new connection
+    clientList.append(conn)
     client_thread = threading.Thread(target=handle_client, args=(conn, addr))
     client_thread.start()  # Start a new thread for the client
+    getInput()
