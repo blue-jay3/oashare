@@ -1,0 +1,7 @@
+services:
+  p2p:
+    scale: 4
+    build: .
+
+networks:
+  p2p-share:
