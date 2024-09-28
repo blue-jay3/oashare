@@ -1,3 +1,6 @@
+# RUN: docker compose up -d
+# TEARDOWN: docker compose down
+
 services:
   p2p:
     scale: 4
