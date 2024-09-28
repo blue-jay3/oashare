@@ -11,6 +11,9 @@ def handle_client(conn, addr):
                 break
             print(f"Received from {addr}: {data.decode()}")
             conn.sendall(data)  # Echo back the received data
+            message = input("").encode()
+            print('Sending:', message.decode())
+            conn.sendall(message)
         except Exception as e:
             print(f"Error with client {addr}: {e}")
             break
@@ -21,7 +24,7 @@ port = 12345  # Specify your port number
 
 # Create server socket
 server_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-server_sock.bind(('0.0.0.0', port))
+server_sock.bind(('192.168.77.246', port))
 server_sock.listen(5)  # Allow up to 5 queued connections
 print(f"Server listening on port {port}...")
 
