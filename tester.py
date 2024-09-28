@@ -4,7 +4,7 @@ import asyncio
 import argparse
 
 class P2PNode:
-    def __init__(self, host='172.20.10.12', port=12345):
+    def __init__(self, host='127.0.0.1', port=12345):
         self.host = host
         self.port = port
         self.connections = []
@@ -18,7 +18,7 @@ class P2PNode:
                 if not message:
                     break
                 message = message.decode()
-                # Print received message, but do not re-broadcast our own messages
+                # Print received message, do not re-broadcast our own messages
                 if not message.startswith(f"msg:{self.node_id}:"):
                     print(f"Received: {message}")
                     self.broadcast(message)
@@ -65,11 +65,7 @@ class P2PNode:
     async def send_message(self, message):
         """Asynchronous method to send a message to all connected clients."""
         prefixed_message = f"msg:{self.node_id}:{message}"  # Prefix with node ID
-        for conn in self.connections:
-            try:
-                conn.sendall(prefixed_message.encode())
-            except Exception as e:
-                print(f"Error sending message: {e}")
+        self.broadcast(prefixed_message)  # Broadcast to all connections
 
     async def run(self, initial_peers):
         # Start server in a separate thread
