@@ -7,10 +7,10 @@ class P2PNode:
     def __init__(self, host='127.0.0.1', port=12345):
         self.host = host
         self.port = port
-        self.connections = []
+        self.connections = {}
         self.node_id = f"{host}:{port}"  # Unique identifier for the node
 
-    def handle_client(self, client_socket):
+    def handle_client(self, client_socket, addr):
         """Handle incoming messages from a client."""
         while True:
             try:
@@ -20,21 +20,21 @@ class P2PNode:
                 message = message.decode()
                 # Print received message, do not re-broadcast our own messages
                 if not message.startswith(f"msg:{self.node_id}:"):
-                    print(f"Received: {message}")
+                    print(f"Received from {addr}: {message}")
                     self.broadcast(message)
             except Exception as e:
                 print(f"Error: {e}")
                 break
         client_socket.close()
-        self.connections.remove(client_socket)
+        del self.connections[addr]
 
     def broadcast(self, message):
         """Send a message to all connected clients."""
-        for conn in self.connections:
+        for addr, conn in self.connections.items():
             try:
                 conn.sendall(message.encode())
             except Exception as e:
-                print(f"Error sending message: {e}")
+                print(f"Error sending message to {addr}: {e}")
 
     def start_server(self):
         """Start the TCP server."""
@@ -46,26 +46,28 @@ class P2PNode:
         while True:
             client_socket, addr = server.accept()
             print(f"Accepted connection from {addr}")
-            self.connections.append(client_socket)
-            client_thread = threading.Thread(target=self.handle_client, args=(client_socket,))
+            self.connections[addr] = client_socket
+            client_thread = threading.Thread(target=self.handle_client, args=(client_socket, addr))
             client_thread.start()
 
     async def connect_to_peer(self, peer_host, peer_port):
         """Connect to a single peer."""
         peer_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         peer_socket.connect((peer_host, peer_port))
-        self.connections.append(peer_socket)
+        self.connections[(peer_host, peer_port)] = peer_socket
         print(f"Connected to peer at {peer_host}:{peer_port}")
 
-    async def connect_to_peers(self, peers):
-        """Connect to multiple peers."""
-        for peer_host, peer_port in peers:
-            await self.connect_to_peer(peer_host, peer_port)
-
-    async def send_message(self, message):
-        """Asynchronous method to send a message to all connected clients."""
-        prefixed_message = f"msg:{self.node_id}:{message}"  # Prefix with node ID
-        self.broadcast(prefixed_message)  # Broadcast to all connections
+    async def send_message(self, peer_addr, message):
+        """Asynchronous method to send a message to a specific peer."""
+        if peer_addr in self.connections:
+            prefixed_message = f"msg:{self.node_id}:{message}"  # Prefix with node ID
+            try:
+                self.connections[peer_addr].sendall(prefixed_message.encode())
+                print(f"Sent to {peer_addr}: {message}")
+            except Exception as e:
+                print(f"Error sending message to {peer_addr}: {e}")
+        else:
+            print(f"Peer {peer_addr} is not connected.")
 
     async def run(self, initial_peers):
         # Start server in a separate thread
@@ -77,13 +79,16 @@ class P2PNode:
 
         # Asynchronous loop for sending messages and adding new peers
         while True:
-            command = input("Enter 'msg:<message>' to send a message or 'add:<host>:<port>' to add a peer (type 'exit' to quit): ")
+            command = input("Enter 'send:<host>:<port>:<message>' to send a message, 'add:<host>:<port>' to add a peer, or 'exit' to quit: ")
             if command.lower() == 'exit':
                 break
             
-            if command.startswith("msg:"):
-                message = command[4:]  # Extract message after "msg:"
-                await self.send_message(message)
+            if command.startswith("send:"):
+                try:
+                    _, host, port, message = command.split(':', 3)  # Split into host, port, and message
+                    await self.send_message((host, int(port)), message)
+                except ValueError:
+                    print("Invalid format. Use 'send:<host>:<port>:<message>'.")
             elif command.startswith("add:"):
                 try:
                     _, host, port = command.split(':')
@@ -92,7 +97,7 @@ class P2PNode:
                     print("Invalid format. Use 'add:<host>:<port>'.")
 
         # Cleanup
-        for conn in self.connections:
+        for conn in self.connections.values():
             conn.close()
 
 if __name__ == "__main__":
