@@ -37,9 +37,14 @@ def get_input():
 
 port = 12345  # Specify your port number
 
+
+
 # Create server socket
 server_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 server_sock.bind(('192.168.77.246', port))
+#server_address = ('192.168.77.246',12345) 
+#server_sock.connect(server_address)
+
 server_sock.listen(5)  # Allow up to 5 queued connections
 print(f"Server listening on port {port}...")
 
