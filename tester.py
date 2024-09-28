@@ -4,10 +4,11 @@ import asyncio
 import argparse
 
 class P2PNode:
-    def __init__(self, host='192.168.77.23', port=12345):
+    def __init__(self, host='127.0.0.1', port=12345):
         self.host = host
         self.port = port
         self.connections = []
+        self.node_id = f"{host}:{port}"  # Unique identifier for the node
 
     def handle_client(self, client_socket):
         """Handle incoming messages from a client."""
@@ -16,8 +17,10 @@ class P2PNode:
                 message = client_socket.recv(1024)
                 if not message:
                     break
-                print(f"Received: {message.decode()}")
-                self.broadcast(message)
+                message = message.decode()
+                if not message.startswith("msg:"):  # Check if it's our message format
+                    print(f"Received: {message}")
+                    self.broadcast(message)
             except Exception as e:
                 print(f"Error: {e}")
                 break
@@ -28,7 +31,7 @@ class P2PNode:
         """Send a message to all connected clients."""
         for conn in self.connections:
             try:
-                conn.sendall(message)
+                conn.sendall(message.encode())
             except Exception as e:
                 print(f"Error sending message: {e}")
 
@@ -62,7 +65,7 @@ class P2PNode:
         """Asynchronous method to send a message to all connected clients."""
         for conn in self.connections:
             try:
-                conn.sendall(message.encode())
+                conn.sendall(f"msg:{self.node_id}:{message}".encode())  # Prefix with node ID
             except Exception as e:
                 print(f"Error sending message: {e}")
 
@@ -76,7 +79,6 @@ class P2PNode:
 
         # Asynchronous loop for sending messages and adding new peers
         while True:
-            # Check for new input to send messages or add peers
             command = input("Enter 'msg:<message>' to send a message or 'add:<host>:<port>' to add a peer (type 'exit' to quit): ")
             if command.lower() == 'exit':
                 break
