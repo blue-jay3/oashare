@@ -57,8 +57,8 @@ class Client:
             for host in self.ip_network.hosts():
                 if host.is_reserved:
                     continue
-                # if host == self.localhost:
-                #     continue
+                if host == self.localhost:
+                    continue
                 node = Node(host, 3000)
                 task = tg.create_task(self.attempt_connection(node))
                 connection_tasks.add(task)
