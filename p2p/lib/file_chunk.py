@@ -6,7 +6,7 @@ from ipaddress import IPv4Address
 import struct
 import uuid
 
-from lib.node import Node
+from p2p.lib.node import Node
 
 @dataclass
 class FileChunk:

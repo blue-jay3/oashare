@@ -8,3 +8,8 @@ class Command(Enum):
     ACKNOWLEDGE = b"ACK:"
     ERROR = b"ERR:"
     DATA = b"DAT:"
+    TRANSFER = b"TRA:"
+    PEER = b"PER:"
+    INITIALIZE = b"INI:"
+    RETRY = b"RET:"
+    DISCONNECT = b"DIS:"

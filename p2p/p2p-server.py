@@ -5,10 +5,13 @@ from ipaddress import IPv4Network, IPv4Address
 import socket
 from uuid import UUID
 import sqlite3
+import sys
 
-from lib.commands import Command
-from lib.file_chunk import FileChunk
-from lib.node import Node
+sys.path.append('.')
+
+from p2p.lib.commands import Command
+from p2p.lib.file_chunk import FileChunk
+from p2p.lib.node import Node
 
 class Server:
     peers: set[Node]
@@ -39,9 +42,21 @@ class Server:
         if node not in self.peers:
             self.peers.add(node)
             print(f"Unrecognized peer {node}. Updating entries.")
+        return node
 
-    async def process_connection(self, data: bytes) -> bytes:
-        return Command.ACKNOWLEDGE.value
+    async def process_connection(self, client_node:Node, client_socket: socket.socket) -> bytes:
+        # Receive connection
+        # Offer list of known peers (including self)
+        # Maybe selection of chunks?
+        response = b""
+        for peer in self.peers:
+            if peer == client_node:
+                continue
+            response += Command.PEER.value
+            response += peer.encode()
+            response += b"\n"
+
+        return Command.TERMINATE.value
 
     async def process_upload(self, data: bytes) -> bytes:
         chunk = FileChunk.decode(data)
@@ -84,6 +99,13 @@ class Server:
         response += Command.TERMINATE.value
         return response
 
+    async def process_disconnect(self, data: bytes):
+        # Disconnect should notify first,
+        # then round robin distribute hashes,
+        # then terminate.
+        # Iterate through known peers, removing node
+        pass
+
     async def process_command(self, command: bytes, data: bytes):
         if command.hex() == Command.CONNECT.value.hex():
             return await self.process_connection(data)
@@ -96,7 +118,7 @@ class Server:
     async def handle_client_connection(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
         request = None
         client_socket: socket.socket = writer.transport.get_extra_info('socket')
-        self.process_peer(client_socket)
+        node = self.process_peer(client_socket)
         while not reader.at_eof():
             command = await reader.read(4)
             print(command)

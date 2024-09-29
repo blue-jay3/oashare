@@ -9,11 +9,13 @@ import struct
 import sys
 from uuid import uuid4, UUID
 
+sys.path.append('.')
+
 import netifaces
 
-from lib.commands import Command
-from lib.file_chunk import FileChunk
-from lib.node import Node
+from p2p.lib.commands import Command
+from p2p.lib.file_chunk import FileChunk
+from p2p.lib.node import Node
 
 class Client:
     CHUNK_SIZE = 512
@@ -47,6 +49,35 @@ class Client:
                 task.add_done_callback(connection_tasks.discard)
 
         print("Total peers:", len(self.peers))
+
+    async def attempt_connections(self):
+        connection_tasks = set()
+        async with asyncio.TaskGroup() as tg:
+            for host in self.ip_network.hosts():
+                if host.is_reserved:
+                    continue
+                # if host == localhost:
+                #     continue
+                node = Node(host, 3000)
+                task = tg.create_task(self.attempt_connection(node))
+                connection_tasks.add(task)
+                task.add_done_callback(connection_tasks.discard)
+
+        print("Total peers:", len(self.peers))
+
+
+    async def attempt_connection(self, node: Node):
+        ip = node.ip_address
+        port = node.port
+        con = asyncio.open_connection(str(ip), port)
+        try:
+            reader, writer = await asyncio.wait_for(con, timeout=5)
+            writer.write(Command.CONNECT.value)
+            writer.write(b"\n")
+        except (asyncio.TimeoutError, ConnectionRefusedError, OSError) as e:
+            return (ip, port, False)
+        except Exception as e:
+            raise e
 
     async def test_connection(self, ip: IPv4Address, port: int):
         con = asyncio.open_connection(str(ip), port)
