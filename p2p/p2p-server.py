@@ -5,6 +5,7 @@ from ipaddress import IPv4Network, IPv4Address
 import socket
 from uuid import UUID
 import sqlite3
+import struct
 import sys
 
 sys.path.append('.')
@@ -27,6 +28,7 @@ class Server:
                     file_name TEXT NOT NULL,
                     size INTEGER NOT NULL,
                     chunk_order INTEGER NOT NULL,
+                    num_chunks INTEGER NOT NULL,
                     checksum TEXT NOT NULL,
                     next_ip TEXT,
                     next_port INTEGER,
@@ -41,7 +43,7 @@ class Server:
         node = Node(IPv4Address(client_ip), 3000)
         if node not in self.peers:
             self.peers.add(node)
-            print(f"Unrecognized peer {node}. Updating entries.")
+            print(f"SERVER: Unrecognized peer {node}. Updating entries.")
         return node
 
     async def process_connection(self, client_node:Node) -> bytes:
@@ -66,9 +68,9 @@ class Server:
 
         with self.db_connection:
             self.db_connection.execute('''
-                INSERT OR IGNORE INTO file_chunks (file_id, file_name, size, chunk_order, checksum, next_ip, next_port, data)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            ''', (str(chunk.file_id), chunk.file_name, chunk.size, chunk.order, chunk.file_checksum.hex(), chunk.next_node.ip_address.compressed, chunk.next_node.port, chunk.data))
+                INSERT OR IGNORE INTO file_chunks (file_id, file_name, size, chunk_order, num_chunks, checksum, next_ip, next_port, data)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (str(chunk.file_id), chunk.file_name, chunk.size, chunk.order, chunk.num_chunks, chunk.file_checksum.hex(), chunk.next_node.ip_address.compressed, chunk.next_node.port, chunk.data))
 
         print("Added file chunk to database")
 
@@ -84,7 +86,7 @@ class Server:
 
         response = b""
         for result in results:
-            (file_id, file_name, size, order, file_checksum, next_ip_address, next_port, data) = result
+            (file_id, file_name, size, order, num_chunks, file_checksum, next_ip_address, next_port, data) = result
             file_id = UUID(file_id)
             next_node = Node(IPv4Address(next_ip_address), next_port)
             file_checksum = unhexlify(file_checksum)
@@ -92,6 +94,7 @@ class Server:
                 file_id,
                 size,
                 order,
+                num_chunks,
                 file_checksum,
                 next_node,
                 file_name,
@@ -100,6 +103,30 @@ class Server:
             response += Command.DATA.value + chunk.encode() + b"\n"
         response += Command.TERMINATE.value
         return response
+
+    async def process_retry(self, data: bytes):
+        response = b""
+        file_id = UUID(bytes=unhexlify(data[:32]))
+        (order,) = struct.unpack('H', data[32:34])
+        result = self.find_chunk(file_id, order)
+        (file_id, file_name, size, order, num_chunks, file_checksum, next_ip_address, next_port, data) = result
+        file_id = UUID(file_id)
+        next_node = Node(IPv4Address(next_ip_address), next_port)
+        file_checksum = unhexlify(file_checksum)
+        chunk = FileChunk(
+            file_id,
+            size,
+            order,
+            num_chunks,
+            file_checksum,
+            next_node,
+            file_name,
+            data
+        )
+        response += Command.DATA.value + chunk.encode() + b"\n"
+        response += Command.TERMINATE.value
+        return response
+
 
     async def process_disconnect(self, client_node: Node):
         # Disconnect should notify first,
@@ -115,6 +142,8 @@ class Server:
             return await self.process_upload(data)
         elif command.hex() == Command.DOWNLOAD.value.hex():
             return await self.process_download(data)
+        elif command.hex() == Command.RETRY.value.hex():
+            return await self.process_retry(data)
         return Command.ERROR.value
 
     async def handle_client_connection(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
@@ -138,12 +167,12 @@ class Server:
     def close(self):
         self.db_connection.close()
 
-    def find_chunk(self, file_id, order):
+    def find_chunk(self, file_id: UUID, order: int):
         with self.db_connection:
             result = self.db_connection.execute('''
                 SELECT * FROM file_chunks WHERE file_id = (?) AND chunk_order = (?)
             ''', (str(file_id), order,)).fetchone()
-        
+
         return result
 
 def main():

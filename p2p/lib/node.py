@@ -9,7 +9,7 @@ class Node:
     port: int
 
     def encode(self) -> bytes:
-        return struct.pack("4sH", self.ip_address.packed, self.port)
+        return struct.pack(">4sH", self.ip_address.packed, self.port)
 
     @classmethod
     def null_node(cls):
