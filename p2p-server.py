@@ -24,13 +24,14 @@ class Server:
         pass
 
     async def process_upload(self, data: bytes):
-        pass
+        chunk = FileChunk.decode(data)
+        print(str(chunk))
 
     async def process_command(self, command: bytes, data: bytes):
         if command.hex() == Command.CONNECT.value.hex():
             await self.process_connection(data)
         elif command.hex() == Command.UPLOAD.value.hex():
-            pass
+            await self.process_upload(data)
 
     async def handle_client_connection(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
         request = None
@@ -41,7 +42,7 @@ class Server:
             print(command)
             data = await reader.readline()
             print(data)
-            request = data
+            await self.process_command(command, data)
             response = f"ACK\n"
             writer.write(response.encode('utf8'))
             await writer.drain()
