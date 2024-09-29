@@ -8,6 +8,8 @@ import random
 import socket
 import struct
 import sys
+import threading
+from typing_extensions import Annotated
 from uuid import uuid4, UUID
 
 sys.path.append('.')
@@ -17,6 +19,12 @@ import netifaces
 from p2p.lib.commands import Command
 from p2p.lib.file_chunk import FileChunk
 from p2p.lib.node import Node
+
+import typer
+import subprocess
+from rich import print as rprint
+
+app = typer.Typer(help="Join the p2p file-sharing network.")
 
 class Client:
     CHUNK_SIZE = 512
@@ -65,7 +73,6 @@ class Client:
                 task.add_done_callback(connection_tasks.discard)
 
         print("Total peers:", len(self.peers))
-
 
     async def attempt_connection(self, node: Node):
         ip = node.ip_address
@@ -291,7 +298,6 @@ class Client:
                     await self.upload_chunk(receiver_node, chunk)
             return file_id
 
-
 def get_network_interfaces():
     interfaces = netifaces.interfaces()
     interface_info = {}
@@ -340,6 +346,32 @@ def test_chunks():
     assert test_chunk.order == chunk.order
     assert test_chunk.data == chunk.data
 
+
+client = Client()
+
+@app.command(help="Test connections with peers.")
+def test_connections():
+    """Test connections to available peers in the network."""
+    asyncio.run(client.attempt_connections())
+
+@app.command(help="Upload a file to the network.")
+def upload(file_name: Annotated[str, typer.Argument(help="The file name to upload."),]):
+    """Upload a specified file to the peer-to-peer network."""
+    file_id = asyncio.run(client.upload_file(file_name))
+    if file_id:
+        rprint(f"Uploaded file '{file_name}' with ID: {file_id}")
+
+@app.command(help="Download a file using its UUID.")
+def download(file_uuid: Annotated[str, typer.Argument(help="The UUID of the file to download."),]):
+    """Download a file from peers using its UUID."""
+    try:
+        file_id = UUID(file_uuid)  # Ensure the UUID is valid
+        asyncio.run(client.download_file(file_id))
+        rprint(f"Downloaded file with UUID: {file_uuid}")
+    except ValueError:
+        rprint("[red]Invalid UUID format.[/red]")
+
 if __name__ == "__main__":
-    test_chunks()
-    main()
+    # test_chunks()
+    #client = Client()
+    app()
