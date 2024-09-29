@@ -1,0 +1,12 @@
+# RUN: docker compose up -d
+# TEARDOWN: docker compose down
+
+services:
+  p2p:
+    scale: 4
+    build:
+      context: .
+      dockerfile: demo.Dockerfile
+
+networks:
+  p2p-share:
