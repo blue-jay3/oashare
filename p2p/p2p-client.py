@@ -56,7 +56,7 @@ class Client:
             for host in self.ip_network.hosts():
                 if host.is_reserved:
                     continue
-                # if host == localhost:
+                # if host == self.localhost:
                 #     continue
                 node = Node(host, 3000)
                 task = tg.create_task(self.attempt_connection(node))
@@ -67,13 +67,25 @@ class Client:
 
 
     async def attempt_connection(self, node: Node):
+        if len(self.peers) > 0:
+            return
         ip = node.ip_address
         port = node.port
         con = asyncio.open_connection(str(ip), port)
         try:
             reader, writer = await asyncio.wait_for(con, timeout=5)
             writer.write(Command.CONNECT.value)
+            writer.write(node.encode())
             writer.write(b"\n")
+            await writer.drain()
+            command = await reader.read(4)
+            while command.hex() != Command.TERMINATE.value.hex():
+                line = await reader.readline()
+                command = await reader.read(4)
+            if node not in self.peers:
+                print(f"Unrecognized peer {node}, updating entries.")
+                self.peers.add(node)
+            return (ip, port, True)
         except (asyncio.TimeoutError, ConnectionRefusedError, OSError) as e:
             return (ip, port, False)
         except Exception as e:
@@ -143,6 +155,9 @@ class Client:
         sorted_chunks: list[FileChunk] = sorted(chunks, key=lambda chunk: chunk.order)
         reconstructed_chunks = b"".join([chunk.data for chunk in sorted_chunks])
         reconstructed_checksum = hashlib.sha256(reconstructed_chunks).digest()
+
+        for chunk in sorted_chunks:
+            print("CHUNK #",chunk.order)
 
         print(reconstructed_checksum, checksum)
 
@@ -223,7 +238,7 @@ def get_usable_interface():
 
 def main():
     client = Client()
-    asyncio.run(client.test_connections())
+    asyncio.run(client.attempt_connections())
     file_id = asyncio.run(client.upload_file('fun.txt'))
     asyncio.run(client.download_file(file_id))
 

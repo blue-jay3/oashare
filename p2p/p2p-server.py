@@ -38,13 +38,13 @@ class Server:
     def process_peer(self, client_socket: socket.socket):
         client_ip, client_port = client_socket.getpeername()
         print(f"Incoming connection from {client_ip}:{client_port}")
-        node = Node(client_ip, 3000)
+        node = Node(IPv4Address(client_ip), 3000)
         if node not in self.peers:
             self.peers.add(node)
             print(f"Unrecognized peer {node}. Updating entries.")
         return node
 
-    async def process_connection(self, client_node:Node, client_socket: socket.socket) -> bytes:
+    async def process_connection(self, client_node:Node) -> bytes:
         # Receive connection
         # Offer list of known peers (including self)
         # Maybe selection of chunks?
@@ -56,7 +56,9 @@ class Server:
             response += peer.encode()
             response += b"\n"
 
-        return Command.TERMINATE.value
+        response += Command.TERMINATE.value
+
+        return response
 
     async def process_upload(self, data: bytes) -> bytes:
         chunk = FileChunk.decode(data)
@@ -99,16 +101,16 @@ class Server:
         response += Command.TERMINATE.value
         return response
 
-    async def process_disconnect(self, data: bytes):
+    async def process_disconnect(self, client_node: Node):
         # Disconnect should notify first,
         # then round robin distribute hashes,
         # then terminate.
         # Iterate through known peers, removing node
         pass
 
-    async def process_command(self, command: bytes, data: bytes):
+    async def process_command(self, command: bytes, data: bytes, client_node: Node):
         if command.hex() == Command.CONNECT.value.hex():
-            return await self.process_connection(data)
+            return await self.process_connection(client_node)
         elif command.hex() == Command.UPLOAD.value.hex():
             return await self.process_upload(data)
         elif command.hex() == Command.DOWNLOAD.value.hex():
@@ -121,10 +123,8 @@ class Server:
         node = self.process_peer(client_socket)
         while not reader.at_eof():
             command = await reader.read(4)
-            print(command)
             data = await reader.readline()
-            print(data)
-            response = await self.process_command(command, data)
+            response = await self.process_command(command, data, node)
             writer.write(response + b"\n")
             await writer.drain()
         writer.close()

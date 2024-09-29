@@ -22,9 +22,7 @@ class FileChunk:
         size_bytes = struct.pack('H', len(self.data))
         order_bytes = struct.pack('H', self.order)
         id_bytes = hexlify(self.file_id.bytes)
-        print(len(id_bytes))
         file_checksum = hexlify(self.file_checksum)
-        print(len(file_checksum))
         next_node_bytes = self.next_node.encode()
         file_name = self.file_name.encode()
 
