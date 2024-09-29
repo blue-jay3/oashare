@@ -1,5 +1,6 @@
 import asyncio
 from ipaddress import IPv4Address, IPv4Interface, IPv4Network
+import hashlib
 import itertools
 import random
 import socket
@@ -120,6 +121,9 @@ class Client:
             sharing_peers.append(all_peers.pop())
 
         with open(file_name, 'rb') as data_file:
+            full_file = data_file.read()
+            checksum = hashlib.sha256(full_file).digest()
+            data_file.seek(0)
             index = 0
             file_id = uuid4()
             while True:
@@ -132,7 +136,7 @@ class Client:
                 next_node = sharing_peers[(index + 1) % len(sharing_peers)]
                 if size < self.CHUNK_SIZE:
                     next_node = Node(IPv4Address("0.0.0.0"), 0)
-                chunk = FileChunk(file_id, size, index, next_node, file_name, data_chunk)
+                chunk = FileChunk(file_id, size, index, checksum, next_node, file_name, data_chunk)
                 await self.upload_chunk(receiver_node, chunk)
 
 
@@ -164,12 +168,17 @@ def main():
 
 def test_chunks():
     next_node = Node(IPv4Address("127.0.0.1"), 12345)
-    chunk = FileChunk(uuid4(), 512, 1, next_node, "test.dat", b"0" * 512)
+    data = b"0" * 512
+    checksum = hashlib.sha256(data).digest()
+    chunk = FileChunk(uuid4(), 512, 1, checksum, next_node, "test.dat", data)
     chunk_bytes = chunk.encode()
     test_chunk = FileChunk.decode(chunk_bytes)
 
     assert test_chunk.next_node.ip_address == chunk.next_node.ip_address
     assert test_chunk.next_node.port == chunk.next_node.port
+    assert test_chunk.file_id == chunk.file_id
+    assert test_chunk.file_name == chunk.file_name
+    assert test_chunk.file_checksum == chunk.file_checksum
     assert test_chunk.size == chunk.size
     assert test_chunk.order == chunk.order
     assert test_chunk.data == chunk.data
