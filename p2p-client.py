@@ -5,10 +5,11 @@ import random
 import socket
 import struct
 import sys
-from uuid import uuid4
+from uuid import uuid4, UUID
 
 import netifaces
 
+from lib.commands import Command
 from lib.file_chunk import FileChunk
 from lib.node import Node
 
@@ -49,7 +50,7 @@ class Client:
         con = asyncio.open_connection(str(ip), port)
         try:
             reader, writer = await asyncio.wait_for(con, timeout=5)
-            writer.write(b"CON:")
+            writer.write(Command.CONNECT.value)
             writer.write(struct.pack("4sH", ip.packed, port))
             writer.write(b"\n")
             await writer.drain()
@@ -67,17 +68,43 @@ class Client:
         except Exception as e:
             raise e
 
+    async def download_chunks(self, node: Node, file_id: UUID):
+        ip = node.ip_address
+        port = node.port
+        con = asyncio.open_connection(str(ip), port)
+        try:
+            reader, writer = await asyncio.wait_for(con, timeout=5)
+            writer.write(Command.DOWNLOAD.value)
+            writer.write(file_id.bytes)
+            writer.write(b"\n")
+            await writer.drain()
+            result = await reader.read(1024)
+            print(result.decode())
+            writer.close()
+            await writer.wait_closed()
+        except (asyncio.TimeoutError, ConnectionRefusedError, OSError) as e:
+            return (ip, port, False)
+        except Exception as e:
+            raise e
+
+    async def download_file(self, file_id: UUID):
+        chunks = []
+        for peer in self.peers:
+            await self.download_chunks(peer, file_id)
+
+
     async def upload_chunk(self, receiver_node: Node, chunk: FileChunk):
         ip = receiver_node.ip_address
         port = receiver_node.port
         con = asyncio.open_connection(str(ip), port)
         try:
             reader, writer = await asyncio.wait_for(con, timeout=5)
-            writer.write(b"UPL:")
+            writer.write(Command.UPLOAD.value)
             writer.write(chunk.encode())
             writer.write(b"\n")
             await writer.drain()
             result = await reader.read(1024)
+            print(result.decode())
             writer.close()
             await writer.wait_closed()
         except (asyncio.TimeoutError, ConnectionRefusedError, OSError) as e:
@@ -89,7 +116,7 @@ class Client:
         all_peers = self.peers.copy()
 
         sharing_peers = []
-        while len(all_peers) > 0:
+        while len(all_peers) > 0 and len(sharing_peers) < 4:
             sharing_peers.append(all_peers.pop())
 
         with open(file_name, 'rb') as data_file:
@@ -133,8 +160,9 @@ def main():
     client = Client()
     asyncio.run(client.test_connections())
     asyncio.run(client.upload_file('fun.txt'))
+    asyncio.run(client.download_file(uuid4()))
 
-if __name__ == "__main__":
+def test_chunks():
     next_node = Node(IPv4Address("127.0.0.1"), 12345)
     chunk = FileChunk(uuid4(), 512, 1, next_node, "test.dat", b"0" * 512)
     chunk_bytes = chunk.encode()
@@ -145,4 +173,7 @@ if __name__ == "__main__":
     assert test_chunk.size == chunk.size
     assert test_chunk.order == chunk.order
     assert test_chunk.data == chunk.data
+
+if __name__ == "__main__":
+    test_chunks()
     main()

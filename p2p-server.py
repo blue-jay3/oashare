@@ -1,6 +1,7 @@
 import asyncio
 from ipaddress import IPv4Network
 import socket
+from uuid import UUID
 
 from lib.commands import Command
 from lib.file_chunk import FileChunk
@@ -28,7 +29,8 @@ class Server:
         print(str(chunk))
 
     async def process_download(self, data: bytes):
-        pass
+        file_id = data[:16]
+        print(UUID(bytes=file_id))
 
     async def process_command(self, command: bytes, data: bytes):
         if command.hex() == Command.CONNECT.value.hex():
