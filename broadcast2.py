@@ -45,14 +45,28 @@ class P2PNode:
         for peer in peer_list.split('\n'):
             if peer:  # Avoid empty strings
                 ip, port = peer.split(':')
-                if (ip, int(port)) not in self.connections and (ip, int(port)) != (self.host, self.port):
+                peer_addr = (ip, int(port))
+                if peer_addr not in self.connections and peer_addr != (self.host, self.port):
                     print(f"Adding peer from client: {peer}")
-                    self.connect_to_peer(ip, int(port))
+                    self.connect_to_peer(ip, int(port), connect_back=False)
+
+        # Notify all existing peers of the new peer
+        self.notify_peers_of_new_connection()
 
     def send_peer_list(self, client_socket):
         peer_list = "\n".join([f"{ip}:{p}" for (ip, p) in self.connections.keys()])
         client_socket.sendall(peer_list.encode())
         client_socket.sendall(f"{self.host}:{self.port}".encode())  # Send its own address
+
+    def notify_peers_of_new_connection(self):
+        """Notify all existing peers about the new connection."""
+        new_peer = f"{self.host}:{self.port}"
+        for peer in self.connections.keys():
+            try:
+                peer_socket = self.connections[peer]
+                peer_socket.sendall(f"NEW_PEER:{new_peer}".encode())
+            except Exception as e:
+                print(f"Failed to notify {peer}: {e}")
 
     def start_server(self):
         server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -68,16 +82,31 @@ class P2PNode:
             except OSError:
                 break  # Server was closed
 
-    def connect_to_peer(self, peer_host, peer_port):
+    def connect_to_peer(self, peer_host, peer_port, connect_back=True):
+        peer_addr = (peer_host, peer_port)
+        if peer_addr in self.connections:
+            print(f"Already connected to {peer_addr}, skipping.")
+            return  # Prevent duplicate connections
+
         try:
             peer_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            peer_socket.connect((peer_host, peer_port))
-            self.connections[(peer_host, peer_port)] = peer_socket
-            print(f"Successfully connected to peer at {peer_host}:{peer_port}")
+            peer_socket.connect(peer_addr)
+            self.connections[peer_addr] = peer_socket
+            print(f"Successfully connected to peer at {peer_addr}")
+
+            # Send its own peer list to the newly connected peer
             self.send_peer_list(peer_socket)
+
+            # Connect back to the original node if required
+            if connect_back:
+                threading.Thread(target=self.connect_to_peer, args=(self.host, self.port, False)).start()
+
+            # Notify existing peers about the new connection
+            self.notify_peers_of_new_connection()
+
             self.update_peer_list()
         except Exception as e:
-            print(f"Failed to connect to {peer_host}:{peer_port} - {e}")
+            print(f"Failed to connect to {peer_addr} - {e}")
 
     def upload_file(self, file_path):
         if not os.path.isfile(file_path):
@@ -164,6 +193,9 @@ class P2PApp:
         self.peer_listbox.config(yscrollcommand=scrollbar.set)
         scrollbar.config(command=self.peer_listbox.yview)
 
+        # Bind terminal input
+        self.text_area.bind("<Return>", self.handle_terminal_input)
+
     def start_node(self):
         host = self.host_entry.get() or '127.0.0.1'
         port = self.port_entry.get() or 12345
@@ -184,32 +216,41 @@ class P2PApp:
             self.text_area.insert(tk.END, f"Node disconnected from {self.node.host}:{self.node.port}\n")
             self.disconnect_button.config(state=tk.DISABLED)
             self.start_button.config(state=tk.NORMAL)
-            self.peer_listbox.delete(0, tk.END)  # Clear the peer list
+            self.peer_listbox.delete(0, tk.END)
 
     def connect_to_peer(self):
-        peer_info = self.entry.get()
-        self.entry.delete(0, tk.END)  # Clear input field
-        if ':' in peer_info:
-            host, port = peer_info.split(':')
-            try:
-                self.node.connect_to_peer(host, int(port))
-                self.text_area.insert(tk.END, f"Attempting to connect to {peer_info}\n")
-                self.text_area.yview(tk.END)
-            except ValueError:
-                messagebox.showerror("Invalid Input", "Please enter a valid host and port.")
+        peer_info = self.entry.get().strip()
+        if ':' not in peer_info:
+            messagebox.showerror("Invalid Input", "Enter in format: IP:Port")
+            return
+        
+        try:
+            ip, port = peer_info.split(':')
+            port = int(port)
+            self.node.connect_to_peer(ip, port)
+            self.text_area.insert(tk.END, f"Connecting to peer {ip}:{port}\n")
+        except ValueError:
+            messagebox.showerror("Invalid Port", "Please enter a valid port number.")
 
     def upload_file(self):
         file_path = filedialog.askopenfilename()
         if file_path:
             self.node.upload_file(file_path)
-            self.text_area.insert(tk.END, f"Uploaded file: {file_path}\n")
-            self.text_area.yview(tk.END)
+            self.text_area.insert(tk.END, f"File {file_path} uploaded.\n")
 
-    def update_peer_list_display(self, peers):
-        """Update the Listbox with the current peer list."""
+    def update_peer_list_display(self, peer_list):
         self.peer_listbox.delete(0, tk.END)  # Clear existing list
-        for peer in peers:
+        for peer in peer_list:
             self.peer_listbox.insert(tk.END, f"{peer[0]}:{peer[1]}")
+
+    def handle_terminal_input(self, event):
+        user_input = self.text_area.get("1.0", tk.END).strip().split("\n")[-1]
+        if user_input.lower() == "disconnect":
+            self.disconnect_node()
+        elif user_input.lower() == "exit":
+            self.root.quit()
+        else:
+            self.text_area.insert(tk.END, "Invalid command.\n")
 
     def run(self):
         self.root.mainloop()
