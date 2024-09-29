@@ -1,9 +1,9 @@
 import socket
 import threading
-import os
-import hashlib
 import tkinter as tk
 from tkinter import scrolledtext, filedialog, messagebox, ttk
+import os
+import hashlib
 
 class P2PNode:
     def __init__(self, host='127.0.0.1', port=12345):
@@ -12,81 +12,43 @@ class P2PNode:
         self.connections = {}
         self.running = True
 
-    def handle_client(self, client_socket, addr):
-        if addr == (self.host, self.port):
-            client_socket.close()  # Ignore self-connection
-            return
-        
-        print(f"Handling client: {addr}")
-        self.connections[addr] = client_socket
-        self.send_peer_list(client_socket)
-
-        # Receive peer list from the connected client
-        peer_list = client_socket.recv(1024).decode()
-        self.update_peer_list_from_client(peer_list)
+    def start_server(self):
+        server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        server_socket.bind((self.host, self.port))
+        server_socket.listen(5)
+        print(f"Listening on {self.host}:{self.port}")
 
         while self.running:
+            client_socket, addr = server_socket.accept()
+            print(f"Accepted connection from {addr}")
+            threading.Thread(target=self.handle_peer, args=(client_socket, addr)).start()
+
+    def handle_peer(self, client_socket, addr):
+        while self.running:
             try:
-                message = client_socket.recv(1024)
-                if not message:
-                    print(f"Connection closed by {addr}")
+                message = client_socket.recv(1024).decode()
+                if message:
+                    print(f"Received message from {addr}: {message}")
+                    # Handle incoming message (e.g., file transfer)
+                else:
                     break
-                print(f"Received message from {addr}: {message.decode()}")
-            except Exception as e:
-                print(f"Error handling client {addr}: {e}")
+            except:
                 break
         
         client_socket.close()
-        del self.connections[addr]
-        self.update_peer_list()
+        print(f"Connection closed with {addr}")
 
-    def update_peer_list_from_client(self, peer_list):
-        """Update the local peer list from the connected client."""
-        for peer in peer_list.split('\n'):
-            if peer:  # Avoid empty strings
-                ip, port = peer.split(':')
-                peer_addr = (ip, int(port))
-                if peer_addr not in self.connections and peer_addr != (self.host, self.port):
-                    print(f"Adding peer from client: {peer}")
-                    self.connect_to_peer(ip, int(port), connect_back=False)
-
-        # Notify all existing peers of the new peer
-        self.notify_peers_of_new_connection()
-
-    def send_peer_list(self, client_socket):
-        peer_list = "\n".join([f"{ip}:{p}" for (ip, p) in self.connections.keys()])
-        client_socket.sendall(peer_list.encode())
-        client_socket.sendall(f"{self.host}:{self.port}".encode())  # Send its own address
-
-    def notify_peers_of_new_connection(self):
-        """Notify all existing peers about the new connection."""
-        new_peer = f"{self.host}:{self.port}"
-        for peer in self.connections.keys():
-            try:
-                peer_socket = self.connections[peer]
-                peer_socket.sendall(f"NEW_PEER:{new_peer}".encode())
-            except Exception as e:
-                print(f"Failed to notify {peer}: {e}")
-
-    def start_server(self):
-        server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        server.bind((self.host, self.port))
-        server.listen(5)
-        print(f"Node server listening on {self.host}:{self.port}")
-
-        while self.running:
-            try:
-                client_socket, addr = server.accept()
-                print(f"Accepted connection from {addr}")
-                threading.Thread(target=self.handle_client, args=(client_socket, addr)).start()
-            except OSError:
-                break  # Server was closed
-
-    def connect_to_peer(self, peer_host, peer_port, connect_back=True):
+    def connect_to_peer(self, peer_host, peer_port):
         peer_addr = (peer_host, peer_port)
+
+        # Prevent self-connection
+        if peer_addr == (self.host, self.port):
+            print(f"Cannot connect to self: {peer_addr}")
+            return
+
         if peer_addr in self.connections:
             print(f"Already connected to {peer_addr}, skipping.")
-            return  # Prevent duplicate connections
+            return
 
         try:
             peer_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -97,48 +59,49 @@ class P2PNode:
             # Send its own peer list to the newly connected peer
             self.send_peer_list(peer_socket)
 
-            # Connect back to the original node if required
-            if connect_back:
-                threading.Thread(target=self.connect_to_peer, args=(self.host, self.port, False)).start()
-
             # Notify existing peers about the new connection
             self.notify_peers_of_new_connection()
 
-            self.update_peer_list()
         except Exception as e:
             print(f"Failed to connect to {peer_addr} - {e}")
 
+    def send_peer_list(self, peer_socket):
+        peer_list = ', '.join([f"{h}:{p}" for (h, p) in self.connections.keys()])
+        peer_socket.send(peer_list.encode())
+
+    def notify_peers_of_new_connection(self):
+        new_peer_info = f"{self.host}:{self.port}"
+        for conn in self.connections.values():
+            conn.send(f"New peer connected: {new_peer_info}".encode())
+
     def upload_file(self, file_path):
-        if not os.path.isfile(file_path):
-            print(f"File {file_path} does not exist.")
-            return
+        # Calculate the file hash for verification
+        file_hash = self.calculate_file_hash(file_path)
+        
+        with open(file_path, 'rb') as file:
+            data = file.read()
+            for peer_addr in self.connections.keys():
+                try:
+                    conn = self.connections[peer_addr]
+                    conn.sendall(f"FILE:{file_hash}:{os.path.basename(file_path)}:".encode() + data)
+                    print(f"File {file_path} sent to {peer_addr}")
+                except Exception as e:
+                    print(f"Failed to send file to {peer_addr} - {e}")
 
+    def calculate_file_hash(self, file_path):
+        """Calculates the SHA-256 hash of the file."""
+        sha256_hash = hashlib.sha256()
         with open(file_path, "rb") as f:
-            file_data = f.read()
-        file_hash = hashlib.md5(file_data).hexdigest()  # Create hash for integrity check
-
-        for peer in self.connections.keys():
-            self.send_file(file_data, peer, file_hash)
-
-    def send_file(self, file_data, peer, file_hash):
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-            sock.connect(peer)
-            sock.sendall(len(file_data).to_bytes(4, byteorder='big'))
-            sock.sendall(file_data)
-            sock.sendall(file_hash.encode())  # Send the hash
+            # Read file in chunks
+            for byte_block in iter(lambda: f.read(4096), b""):
+                sha256_hash.update(byte_block)
+        return sha256_hash.hexdigest()
 
     def shutdown(self):
-        """Clean up on shutdown."""
         self.running = False
-        for peer in list(self.connections.keys()):
-            print(f"Disconnecting from {peer}")
-            self.connections[peer].close()
-        self.connections.clear()
-
-    def update_peer_list(self):
-        """Update the peer list display in the app."""
-        if hasattr(self, 'app'):
-            self.app.update_peer_list_display(list(self.connections.keys()))
+        for conn in self.connections.values():
+            conn.close()
+        print("Node shut down.")
 
 class P2PApp:
     def __init__(self):
@@ -153,7 +116,6 @@ class P2PApp:
         style.configure("TButton", font=("Arial", 12))
         style.configure("TEntry", font=("Arial", 12))
 
-        # Other UI components
         tk.Label(self.root, text="Host IP:").pack(pady=(10, 0))
         self.host_entry = tk.Entry(self.root)
         self.host_entry.pack(fill='x', padx=10, pady=(0, 10))
@@ -178,23 +140,22 @@ class P2PApp:
         self.upload_button = ttk.Button(self.root, text="Upload File", command=self.upload_file)
         self.upload_button.pack(fill='x', padx=10, pady=(0, 5))
 
-        # Console area
         self.text_area = scrolledtext.ScrolledText(self.root, wrap=tk.WORD, height=10, font=("Arial", 12))
         self.text_area.pack(expand=True, fill='both', padx=10, pady=(0, 10))
 
-        # Peer Listbox
         self.peer_listbox = tk.Listbox(self.root, width=30, height=5, font=("Arial", 12))
         self.peer_listbox.pack(side=tk.BOTTOM, fill='x', padx=10, pady=(5, 10))
 
-        # Scrollbar for the Listbox
         scrollbar = tk.Scrollbar(self.root)
         scrollbar.pack(side=tk.BOTTOM, fill=tk.Y)
 
         self.peer_listbox.config(yscrollcommand=scrollbar.set)
         scrollbar.config(command=self.peer_listbox.yview)
 
-        # Bind terminal input
         self.text_area.bind("<Return>", self.handle_terminal_input)
+
+    def show_error_message(self, message):
+        messagebox.showerror("Error", message)
 
     def start_node(self):
         host = self.host_entry.get() or '127.0.0.1'
@@ -208,20 +169,24 @@ class P2PApp:
             self.disconnect_button.config(state=tk.NORMAL)
             self.start_button.config(state=tk.DISABLED)
         except ValueError:
-            messagebox.showerror("Invalid Port", "Please enter a valid port number.")
+            self.show_error_message("Please enter a valid port number.")
 
     def disconnect_node(self):
         if self.node:
             self.node.shutdown()
-            self.text_area.insert(tk.END, f"Node disconnected from {self.node.host}:{self.node.port}\n")
+            self.node = None  # Clear the node reference
+            self.text_area.insert(tk.END, "Node disconnected.\n")
             self.disconnect_button.config(state=tk.DISABLED)
             self.start_button.config(state=tk.NORMAL)
-            self.peer_listbox.delete(0, tk.END)
 
     def connect_to_peer(self):
+        if not self.node:
+            self.show_error_message("Please start the node first.")
+            return
+
         peer_info = self.entry.get().strip()
         if ':' not in peer_info:
-            messagebox.showerror("Invalid Input", "Enter in format: IP:Port")
+            self.show_error_message("Invalid Input. Enter in format: IP:Port")
             return
         
         try:
@@ -230,18 +195,17 @@ class P2PApp:
             self.node.connect_to_peer(ip, port)
             self.text_area.insert(tk.END, f"Connecting to peer {ip}:{port}\n")
         except ValueError:
-            messagebox.showerror("Invalid Port", "Please enter a valid port number.")
+            self.show_error_message("Invalid Port. Please enter a valid port number.")
 
     def upload_file(self):
+        if not self.node:
+            self.show_error_message("Please start the node first.")
+            return
+            
         file_path = filedialog.askopenfilename()
         if file_path:
             self.node.upload_file(file_path)
             self.text_area.insert(tk.END, f"File {file_path} uploaded.\n")
-
-    def update_peer_list_display(self, peer_list):
-        self.peer_listbox.delete(0, tk.END)  # Clear existing list
-        for peer in peer_list:
-            self.peer_listbox.insert(tk.END, f"{peer[0]}:{peer[1]}")
 
     def handle_terminal_input(self, event):
         user_input = self.text_area.get("1.0", tk.END).strip().split("\n")[-1]
