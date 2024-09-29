@@ -1,0 +1,4 @@
+__pycache__
+chunks/*
+!chunks/.keep
+*.db
