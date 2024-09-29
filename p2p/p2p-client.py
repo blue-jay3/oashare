@@ -57,11 +57,10 @@ class Client:
             for host in self.ip_network.hosts():
                 if host.is_reserved:
                     continue
-                if host == self.localhost:
-                    continue
+                # if host == self.localhost:
+                #     continue
                 node = Node(host, 3000)
                 task = tg.create_task(self.attempt_connection(node))
-                await asyncio.sleep(0.01)
                 connection_tasks.add(task)
                 task.add_done_callback(connection_tasks.discard)
 
@@ -89,7 +88,7 @@ class Client:
             if node not in self.peers:
                 print(f"CLIENT: Unrecognized peer {node}, updating entries.")
                 self.peers.add(node)
-            await asyncio.sleep(0.01)
+            await asyncio.sleep(0.1)
             return (ip, port, True)
         except (asyncio.TimeoutError, ConnectionRefusedError, OSError) as e:
             await asyncio.sleep(0.01)
@@ -148,7 +147,6 @@ class Client:
             raise e
 
     async def retry(self, file_id: UUID, missing_chunk: int):
-
         print(f"Retrying file {file_id}, chunk {missing_chunk}")
 
         chunks = []
@@ -284,6 +282,7 @@ class Client:
                     next_node = Node(IPv4Address("0.0.0.0"), 0)
                 chunk = FileChunk(file_id, size, index, num_chunks, checksum, next_node, file_name, data_chunk)
                 index += 1
+
                 (receiver_ip, receiver_port, successful) = await self.upload_chunk(receiver_node, chunk)
                 await asyncio.sleep(random.uniform(0.1,0.2))
                 if not successful:

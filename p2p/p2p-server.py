@@ -5,6 +5,7 @@ from ipaddress import IPv4Network, IPv4Address
 import socket
 from uuid import UUID
 import sqlite3
+import aiosqlite
 import struct
 import sys
 
@@ -16,10 +17,11 @@ from p2p.lib.node import Node
 
 class Server:
     peers: set[Node]
-
+    DB_FILE = 'file_chunks.db'
     def __init__(self):
         self.peers = set()
-        self.db_connection = sqlite3.connect('file_chunks.db')
+
+        self.db_connection = sqlite3.connect(self.DB_FILE)
 
         with self.db_connection:
             self.db_connection.execute('''
@@ -66,23 +68,25 @@ class Server:
         chunk = FileChunk.decode(data)
         print("Uploading to database...")
 
-        with self.db_connection:
-            self.db_connection.execute('''
+        async with aiosqlite.connect(self.DB_FILE) as db:
+            await db.execute('''
                 INSERT OR IGNORE INTO file_chunks (file_id, file_name, size, chunk_order, num_chunks, checksum, next_ip, next_port, data)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''', (str(chunk.file_id), chunk.file_name, chunk.size, chunk.order, chunk.num_chunks, chunk.file_checksum.hex(), chunk.next_node.ip_address.compressed, chunk.next_node.port, chunk.data))
-
+            await db.commit()
         print("Added file chunk to database")
 
         return Command.ACKNOWLEDGE.value + chunk.file_id.bytes.hex().encode()
 
     async def process_download(self, data: bytes):
+        print("Downloading file chunk...")
         file_id = unhexlify(data[:32])
         file_uuid = UUID(bytes=file_id)
-        with self.db_connection:
-            results = self.db_connection.execute('''
+        async with aiosqlite.connect(self.DB_FILE) as db:
+            cursor = await db.execute('''
                 SELECT * FROM file_chunks WHERE file_id = (?)
-            ''', (str(file_uuid),)).fetchall()
+            ''', (str(file_uuid),))
+            results = await cursor.fetchall()
 
         response = b""
         for result in results:
@@ -146,19 +150,35 @@ class Server:
             return await self.process_retry(data)
         return Command.ERROR.value
 
+    async def start_workers(self, num_workers):
+        workers = []
+        for i in range(num_workers):
+            worker_task = asyncio.create_task(self.worker(f"Worker-{i}"))
+            workers.append(worker_task)
+        self.workers = workers
+
+    async def worker(self, name):
+        while True:
+            (reader, writer, node) = await self.task_queue.get()
+            while not reader.at_eof():
+                command = await reader.read(4)
+                data = await reader.readline()
+                response = await self.process_command(command, data, node)
+                writer.write(response + b"\n")
+                await writer.drain()
+            writer.close()
+            self.task_queue.task_done()
+
     async def handle_client_connection(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
         request = None
         client_socket: socket.socket = writer.transport.get_extra_info('socket')
         node = self.process_peer(client_socket)
-        while not reader.at_eof():
-            command = await reader.read(4)
-            data = await reader.readline()
-            response = await self.process_command(command, data, node)
-            writer.write(response + b"\n")
-            await writer.drain()
-        writer.close()
+        await self.task_queue.put((reader, writer, node))
+
 
     async def run_server(self):
+        self.task_queue = asyncio.Queue()
+        await self.start_workers(3)
         server = await asyncio.start_server(self.handle_client_connection, '0.0.0.0', 3000)
         async with server:
             print("Server online at 0.0.0.0:3000.")
@@ -167,12 +187,12 @@ class Server:
     def close(self):
         self.db_connection.close()
 
-    def find_chunk(self, file_id: UUID, order: int):
-        with self.db_connection:
-            result = self.db_connection.execute('''
+    async def find_chunk(self, file_id: UUID, order: int):
+        async with aiosqlite.connect(self.DB_FILE) as db:
+            cursor = await db.execute('''
                 SELECT * FROM file_chunks WHERE file_id = (?) AND chunk_order = (?)
-            ''', (str(file_id), order,)).fetchone()
-
+            ''', (str(file_id), order,))
+            result = await cursor.fetchone()
         return result
 
 def main():
