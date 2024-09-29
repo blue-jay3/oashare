@@ -12,7 +12,7 @@ def handle_client(conn, addr):
             if not data:
                 break
             print(f"Received from {addr}: {data.decode()}")
-            conn.sendall(data)  # Echo back the received data
+            #conn.sendall(data)  # Echo back the received data
         except Exception as e:
             print(f"Error with client {addr}: {e}")
             break
