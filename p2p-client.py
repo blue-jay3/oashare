@@ -1,11 +1,111 @@
 import asyncio
 from ipaddress import IPv4Address, IPv4Interface, IPv4Network
-import netifaces
+import itertools
+import random
 import socket
+import struct
 import sys
 
+import netifaces
+
+from lib.file_chunk import FileChunk
+from lib.node import Node
+
 class Client:
-    pass
+    CHUNK_SIZE = 512
+    peers: set[Node]
+
+    def __init__(self):
+        (self.interface, self.host) = get_usable_interface()
+
+        if self.interface is None or self.host is None:
+            print("No usable interfaces found.")
+            sys.exit(1)
+
+        self.ip_interface = IPv4Interface(self.host)
+        self.ip_network = IPv4Network(self.ip_interface.network.supernet(8))
+        self.localhost = IPv4Address(self.host)
+
+        self.peers = set()
+
+        print(f"Client started on {self.localhost} ({self.interface}).")
+
+    async def test_connections(self):
+        connection_tasks = set()
+        async with asyncio.TaskGroup() as tg:
+            for host in self.ip_network.hosts():
+                if host.is_reserved:
+                    continue
+                # if host == localhost:
+                #     continue
+                task = tg.create_task(self.test_connection(host, 3000))
+                connection_tasks.add(task)
+                task.add_done_callback(connection_tasks.discard)
+
+        print("Total peers:", len(self.peers))
+
+    async def test_connection(self, ip: IPv4Address, port: int):
+        con = asyncio.open_connection(str(ip), port)
+        try:
+            reader, writer = await asyncio.wait_for(con, timeout=5)
+            writer.write(b"CON:")
+            writer.write(struct.pack("4sH", ip.packed, port))
+            writer.write(b"\n")
+            await writer.drain()
+            result = await reader.read(1024)
+            print(f"{ip}:{port}",result.decode())
+            writer.close()
+            await writer.wait_closed()
+            node = Node(ip, port)
+            if node not in self.peers:
+                print(f"Unrecognized peer {node}, updating entries.")
+                self.peers.add(node)
+            return (ip, port, True)
+        except (asyncio.TimeoutError, ConnectionRefusedError, OSError) as e:
+            return (ip, port, False)
+        except Exception as e:
+            raise e
+
+    async def upload_chunk(self, receiver_node: Node, chunk: FileChunk):
+        ip = receiver_node.ip_address
+        port = receiver_node.port
+        con = asyncio.open_connection(str(ip), port)
+        try:
+            reader, writer = await asyncio.wait_for(con, timeout=5)
+            writer.write(b"UPL:")
+            writer.write(chunk.encode())
+            writer.write(b"\n")
+            await writer.drain()
+            result = await reader.read(1024)
+            writer.close()
+            await writer.wait_closed()
+        except (asyncio.TimeoutError, ConnectionRefusedError, OSError) as e:
+            return (ip, port, False)
+        except Exception as e:
+            raise e
+
+    async def upload_file(self, file_name: str):
+        all_peers = self.peers.copy()
+
+        sharing_peers = []
+        while len(all_peers) > 0:
+            sharing_peers.append(all_peers.pop())
+
+        with open(file_name, 'rb') as data_file:
+            index = 0
+            while True:
+                data_chunk = data_file.read(self.CHUNK_SIZE)
+                if not data_chunk:
+                    break
+                size = len(data_chunk)
+
+                receiver_node = sharing_peers[index % len(sharing_peers)]
+                next_node = sharing_peers[(index + 1) % len(sharing_peers)]
+                if size < self.CHUNK_SIZE:
+                    next_node = Node(IPv4Address("0.0.0.0"), 0)
+                chunk = FileChunk(size, index, next_node, data_chunk)
+                await self.upload_chunk(receiver_node, chunk)
+
 
 def get_network_interfaces():
     interfaces = netifaces.interfaces()
@@ -27,61 +127,20 @@ def get_usable_interface():
         return (interface, ip)
     return (None, None)
 
-async def test_connection(ip: IPv4Address, port: int) -> tuple[str, int, bool]:
-    try:
-        reader, writer = await asyncio.open_connection(str(ip), port)
-        writer.write(b"Hello!\n")
-        await writer.drain()
-        result = await reader.readline()
-        print(result.decode())
-        writer.write(b"quit\n")
-        await writer.drain()
-        result = await reader.readline()
-        await reader.read(1)
-        writer.close()
-        await writer.wait_closed()
-        return (ip.compressed, port, True)
-    except (asyncio.TimeoutError, ConnectionRefusedError, OSError) as e:
-        # print("Timeout:", str(e))
-        return (ip.compressed, port, False)
-    except Exception as e:
-        raise e
+def main():
+    client = Client()
+    asyncio.run(client.test_connections())
+    asyncio.run(client.upload_file('fun.txt'))
 
-def good_connection(task: asyncio.Task):
-    result = task.result()
-    if result[2]:
-        print(result)
+if __name__ == "__main__":
+    next_node = Node(IPv4Address("127.0.0.1"), 12345)
+    chunk = FileChunk(512, 1, next_node, b"0" * 512)
+    chunk_bytes = chunk.encode()
+    test_chunk = FileChunk.decode(chunk_bytes)
 
-async def test_connections():
-    (interface, host) = get_usable_interface()
-    if interface is None or host is None:
-        print("No usable interfaces found.")
-        sys.exit(1)
-
-    print(f"Interface: {interface}, IP: {host}")
-
-    ip_interface = IPv4Interface(host)
-
-    ip_network = IPv4Network(ip_interface.network.supernet(8))
-
-    localhost = IPv4Address(host)
-
-    connection_tasks = set()
-    async with asyncio.TaskGroup() as tg:
-        for host in ip_network.hosts():
-            if host.is_reserved:
-                continue
-            # if host == localhost:
-            #     continue
-            task = tg.create_task(test_connection(host, 3000))
-            connection_tasks.add(task)
-            task.add_done_callback(good_connection)
-            task.add_done_callback(connection_tasks.discard)
-
-            # online = await test_connection(host, 3000)
-            # if not online:
-            #     continue
-            # print(host, online)
-
-
-asyncio.run(test_connections())
+    assert test_chunk.next_node.ip_address == chunk.next_node.ip_address
+    assert test_chunk.next_node.port == chunk.next_node.port
+    assert test_chunk.size == chunk.size
+    assert test_chunk.order == chunk.order
+    assert test_chunk.data == chunk.data
+    main()

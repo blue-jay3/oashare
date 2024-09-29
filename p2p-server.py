@@ -2,33 +2,60 @@ import asyncio
 from ipaddress import IPv4Network
 import socket
 
+from lib.commands import Command
 from lib.file_chunk import FileChunk
 from lib.node import Node
 
-class Connections:
-    pass
+class Server:
+    peers: set[Node]
 
-async def handle_client_connection(reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
-    request = None
-    client_socket: socket.socket = writer.transport.get_extra_info('socket')
-    # host_name =
-    client_ip, client_port = client_socket.getpeername()
-    print(f"Incoming connection from {client_ip}:{client_port}")
-    while request != 'quit' and not reader.at_eof():
-        request = (await reader.read(1024)).decode('utf8')
-        response = f"{request}\n"
-        writer.write(response.encode('utf8'))
-        await writer.drain()
-    writer.close()
+    def __init__(self):
+        self.peers = set()
 
-async def run_server():
-    server = await asyncio.start_server(handle_client_connection, '0.0.0.0', 3000)
-    async with server:
-        print("Server online.")
-        await server.serve_forever()
+    def process_peer(self, client_socket: socket.socket):
+        client_ip, client_port = client_socket.getpeername()
+        print(f"Incoming connection from {client_ip}:{client_port}")
+        node = Node(client_ip, 3000)
+        if node not in self.peers:
+            self.peers.add(node)
+            print(f"Unrecognized peer {node}. Updating entries.")
+
+    async def process_connection(self, data: bytes):
+        pass
+
+    async def process_upload(self, data: bytes):
+        pass
+
+    async def process_command(self, command: bytes, data: bytes):
+        if command.hex() == Command.CONNECT.value.hex():
+            await self.process_connection(data)
+        elif command.hex() == Command.UPLOAD.value.hex():
+            pass
+
+    async def handle_client_connection(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
+        request = None
+        client_socket: socket.socket = writer.transport.get_extra_info('socket')
+        self.process_peer(client_socket)
+        while not reader.at_eof():
+            command = await reader.read(4)
+            print(command)
+            data = await reader.readline()
+            print(data)
+            request = data
+            response = f"ACK\n"
+            writer.write(response.encode('utf8'))
+            await writer.drain()
+        writer.close()
+
+    async def run_server(self):
+        server = await asyncio.start_server(self.handle_client_connection, '0.0.0.0', 3000)
+        async with server:
+            print("Server online at 0.0.0.0:3000.")
+            await server.serve_forever()
 
 def main():
-    asyncio.run(run_server())
+    server = Server()
+    asyncio.run(server.run_server())
 
 if __name__ == "__main__":
     main()
