@@ -8,11 +8,15 @@ from lib.node import Node
 class Connections:
     pass
 
-async def handle_client_connection(reader, writer):
+async def handle_client_connection(reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
     request = None
-    while request != 'quit':
+    client_socket: socket.socket = writer.transport.get_extra_info('socket')
+    # host_name =
+    client_ip, client_port = client_socket.getpeername()
+    print(f"Incoming connection from {client_ip}:{client_port}")
+    while request != 'quit' and not reader.at_eof():
         request = (await reader.read(1024)).decode('utf8')
-        response = str(request) + '\n'
+        response = f"{request}\n"
         writer.write(response.encode('utf8'))
         await writer.drain()
     writer.close()
