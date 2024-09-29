@@ -2,6 +2,7 @@ import asyncio
 from ipaddress import IPv4Network
 import socket
 from uuid import UUID
+import sqlite3
 
 from lib.commands import Command
 from lib.file_chunk import FileChunk
@@ -12,6 +13,21 @@ class Server:
 
     def __init__(self):
         self.peers = set()
+        self.db_connection = sqlite3.connect('file_chunks.db')
+
+        with self.db_connection:
+            self.db_connection.execute('''
+                CREATE TABLE IF NOT EXISTS file_chunks (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    file_id TEXT NOT NULL,
+                    file_name TEXT NOT NULL,
+                    size INTEGER NOT NULL,
+                    chunk_order INTEGER NOT NULL,
+                    next_ip TEXT,
+                    next_port INTEGER,
+                    data BLOB NOT NULL
+                )
+            ''')
 
     def process_peer(self, client_socket: socket.socket):
         client_ip, client_port = client_socket.getpeername()
@@ -26,7 +42,15 @@ class Server:
 
     async def process_upload(self, data: bytes):
         chunk = FileChunk.decode(data)
-        print(str(chunk))
+        print("Uploading to database...")
+
+        with self.db_connection:
+            self.db_connection.execute('''
+                INSERT INTO file_chunks (file_id, file_name, size, chunk_order, next_ip, next_port, data)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            ''', (str(chunk.file_id), chunk.file_name, chunk.size, chunk.order, chunk.next_node.ip_address.compressed, chunk.next_node.port, chunk.data))
+        
+        print("Added file chunk to database")
 
     async def process_download(self, data: bytes):
         file_id = data[:16]
@@ -60,10 +84,16 @@ class Server:
         async with server:
             print("Server online at 0.0.0.0:3000.")
             await server.serve_forever()
+    
+    def close(self):
+        self.db_connection.close()
 
 def main():
     server = Server()
-    asyncio.run(server.run_server())
+    try:
+        asyncio.run(server.run_server())
+    finally:
+        server.close()
 
 if __name__ == "__main__":
     main()
