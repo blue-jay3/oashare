@@ -27,11 +27,16 @@ class Server:
         chunk = FileChunk.decode(data)
         print(str(chunk))
 
+    async def process_download(self, data: bytes):
+        pass
+
     async def process_command(self, command: bytes, data: bytes):
         if command.hex() == Command.CONNECT.value.hex():
             await self.process_connection(data)
         elif command.hex() == Command.UPLOAD.value.hex():
             await self.process_upload(data)
+        elif command.hex() == Command.DOWNLOAD.value.hex():
+            await self.process_download(data)
 
     async def handle_client_connection(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
         request = None
