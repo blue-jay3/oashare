@@ -21,6 +21,10 @@ class P2PNode:
         self.connections[addr] = client_socket
         self.send_peer_list(client_socket)
 
+        # Receive peer list from the connected client
+        peer_list = client_socket.recv(1024).decode()
+        self.update_peer_list_from_client(peer_list)
+
         while self.running:
             try:
                 message = client_socket.recv(1024)
@@ -36,9 +40,19 @@ class P2PNode:
         del self.connections[addr]
         self.update_peer_list()
 
+    def update_peer_list_from_client(self, peer_list):
+        """Update the local peer list from the connected client."""
+        for peer in peer_list.split('\n'):
+            if peer:  # Avoid empty strings
+                ip, port = peer.split(':')
+                if (ip, int(port)) not in self.connections and (ip, int(port)) != (self.host, self.port):
+                    print(f"Adding peer from client: {peer}")
+                    self.connect_to_peer(ip, int(port))
+
     def send_peer_list(self, client_socket):
         peer_list = "\n".join([f"{ip}:{p}" for (ip, p) in self.connections.keys()])
         client_socket.sendall(peer_list.encode())
+        client_socket.sendall(f"{self.host}:{self.port}".encode())  # Send its own address
 
     def start_server(self):
         server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -59,7 +73,7 @@ class P2PNode:
             peer_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             peer_socket.connect((peer_host, peer_port))
             self.connections[(peer_host, peer_port)] = peer_socket
-            print(f"Connected to peer at {peer_host}:{peer_port}")
+            print(f"Successfully connected to peer at {peer_host}:{peer_port}")
             self.send_peer_list(peer_socket)
             self.update_peer_list()
         except Exception as e:
