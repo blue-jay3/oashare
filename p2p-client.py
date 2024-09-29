@@ -1,4 +1,5 @@
 import asyncio
+from binascii import hexlify
 from ipaddress import IPv4Address, IPv4Interface, IPv4Network
 import hashlib
 import itertools
@@ -73,26 +74,53 @@ class Client:
         ip = node.ip_address
         port = node.port
         con = asyncio.open_connection(str(ip), port)
+        chunks = []
         try:
             reader, writer = await asyncio.wait_for(con, timeout=5)
             writer.write(Command.DOWNLOAD.value)
-            writer.write(file_id.bytes)
+            writer.write(hexlify(file_id.bytes))
             writer.write(b"\n")
             await writer.drain()
-            result = await reader.read(1024)
-            print(result.decode())
+            command = await reader.read(4)
+            while command.hex() != Command.TERMINATE.value.hex():
+                line = await reader.readline()
+                chunk = FileChunk.decode(line)
+                chunks.append(chunk)
+                command = await reader.read(4)
             writer.close()
             await writer.wait_closed()
+            return chunks
         except (asyncio.TimeoutError, ConnectionRefusedError, OSError) as e:
-            return (ip, port, False)
+            return []
         except Exception as e:
             raise e
 
-    async def download_file(self, file_id: UUID):
-        chunks = []
-        for peer in self.peers:
-            await self.download_chunks(peer, file_id)
+    async def retry(self, file_id: UUID, missing_chunks: list[int]):
+        pass
 
+    async def download_file(self, file_id: UUID):
+        chunks: list[FileChunk] = []
+        for peer in self.peers:
+            chunks += await self.download_chunks(peer, file_id)
+
+        if len(chunks) <= 0:
+            return
+
+        file_name = chunks[0].file_name
+        checksum = chunks[0].file_checksum
+
+        sorted_chunks: list[FileChunk] = sorted(chunks, key=lambda chunk: chunk.order)
+        reconstructed_chunks = b"".join([chunk.data for chunk in sorted_chunks])
+        reconstructed_checksum = hashlib.sha256(reconstructed_chunks).digest()
+
+        print(reconstructed_checksum, checksum)
+
+        if reconstructed_checksum != checksum:
+            print("Oh no!")
+            return
+
+        with open(f'{hexlify(checksum).decode()}_{file_name}', 'wb') as out_file:
+            out_file.write(reconstructed_chunks)
 
     async def upload_chunk(self, receiver_node: Node, chunk: FileChunk):
         ip = receiver_node.ip_address
@@ -138,6 +166,8 @@ class Client:
                     next_node = Node(IPv4Address("0.0.0.0"), 0)
                 chunk = FileChunk(file_id, size, index, checksum, next_node, file_name, data_chunk)
                 await self.upload_chunk(receiver_node, chunk)
+                index += 1
+            return file_id
 
 
 def get_network_interfaces():
@@ -163,8 +193,8 @@ def get_usable_interface():
 def main():
     client = Client()
     asyncio.run(client.test_connections())
-    asyncio.run(client.upload_file('fun.txt'))
-    asyncio.run(client.download_file(uuid4()))
+    file_id = asyncio.run(client.upload_file('fun.txt'))
+    asyncio.run(client.download_file(file_id))
 
 def test_chunks():
     next_node = Node(IPv4Address("127.0.0.1"), 12345)
@@ -184,5 +214,5 @@ def test_chunks():
     assert test_chunk.data == chunk.data
 
 if __name__ == "__main__":
-    test_chunks()
+    # test_chunks()
     main()

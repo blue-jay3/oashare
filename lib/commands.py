@@ -6,3 +6,5 @@ class Command(Enum):
     DOWNLOAD = b"DOW:"
     TERMINATE = b"TER:"
     ACKNOWLEDGE = b"ACK:"
+    ERROR = b"ERR:"
+    DATA = b"DAT:"
