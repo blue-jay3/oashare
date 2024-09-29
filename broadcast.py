@@ -6,7 +6,7 @@ import tkinter as tk
 from tkinter import filedialog, scrolledtext, messagebox
 
 class P2PNode:
-    def __init__(self, host='127.0.0.1', port=12345):
+    def __init__(self, host='172.20.10.12', port=12345):
         self.host = host
         self.port = port
         self.connections = {}
