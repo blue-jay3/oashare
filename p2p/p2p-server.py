@@ -138,6 +138,14 @@ class Server:
     def close(self):
         self.db_connection.close()
 
+    def find_chunk(self, file_id, order):
+        with self.db_connection:
+            result = self.db_connection.execute('''
+                SELECT * FROM file_chunks WHERE file_id = (?) AND chunk_order = (?)
+            ''', (str(file_id), order,)).fetchone()
+        
+        return result
+
 def main():
     server = Server()
     try:
