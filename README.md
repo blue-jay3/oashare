@@ -29,3 +29,9 @@ Activate your virtual environment again in a new terminal.
 ```bash
 python p2p/p2p-client.py
 ```
+
+## Docker
+```bash
+docker compose up --build -d
+docker compose logs -f # To see logs
+```
