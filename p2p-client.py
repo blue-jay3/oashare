@@ -103,7 +103,7 @@ class Client:
                 next_node = sharing_peers[(index + 1) % len(sharing_peers)]
                 if size < self.CHUNK_SIZE:
                     next_node = Node(IPv4Address("0.0.0.0"), 0)
-                chunk = FileChunk(size, index, next_node, data_chunk)
+                chunk = FileChunk(size, index, next_node, file_name, data_chunk)
                 await self.upload_chunk(receiver_node, chunk)
 
 
@@ -134,7 +134,7 @@ def main():
 
 if __name__ == "__main__":
     next_node = Node(IPv4Address("127.0.0.1"), 12345)
-    chunk = FileChunk(512, 1, next_node, b"0" * 512)
+    chunk = FileChunk(512, 1, next_node, "test.dat", b"0" * 512)
     chunk_bytes = chunk.encode()
     test_chunk = FileChunk.decode(chunk_bytes)
 
