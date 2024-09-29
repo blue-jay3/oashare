@@ -1,7 +1,9 @@
 FROM python:3.12-alpine
 
+ENV PYTHONUNBUFFERED=1
+
 WORKDIR /app
 
 COPY . .
 
-ENTRYPOINT ["tail", "-f", "/dev/null"]
+ENTRYPOINT [ "/app/docker-entrypoint.sh" ]

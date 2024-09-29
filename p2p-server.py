@@ -1,10 +1,18 @@
 import asyncio
+from ipaddress import IPv4Network
+import socket
+
+from lib.file_chunk import FileChunk
+from lib.node import Node
+
+class Connections:
+    pass
 
 async def handle_client_connection(reader, writer):
     request = None
     while request != 'quit':
-        request = (await reader.read(255)).decode('utf8')
-        response = str(eval(request)) + '\n' # THIS IS REMOTE CODE EXECUTION REPLACE THIS
+        request = (await reader.read(1024)).decode('utf8')
+        response = str(request) + '\n'
         writer.write(response.encode('utf8'))
         await writer.drain()
     writer.close()
@@ -12,9 +20,11 @@ async def handle_client_connection(reader, writer):
 async def run_server():
     server = await asyncio.start_server(handle_client_connection, '0.0.0.0', 3000)
     async with server:
+        print("Server online.")
         await server.serve_forever()
 
-async def run_client():
-    pass
+def main():
+    asyncio.run(run_server())
 
-asyncio.run(run_server())
+if __name__ == "__main__":
+    main()

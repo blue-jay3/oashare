@@ -126,5 +126,11 @@ if __name__ == "__main__":
             host, port = peer.split(':')
             initial_peers.append((host, int(port)))
 
+<<<<<<< Updated upstream
+=======
+    # Example 2D array of files to send: [ [file_path, ip, port], ... ]
+    file_info_array = Encoding.split_file_with_header('fun.txt')
+
+>>>>>>> Stashed changes
     node = P2PNode()
     asyncio.run(node.run(initial_peers))
